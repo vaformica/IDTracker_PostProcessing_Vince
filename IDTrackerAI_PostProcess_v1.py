@@ -135,7 +135,7 @@ def make_tracks_pdf(df: pd.DataFrame, pdf_path: str):
     plt.title("Tracked paths (ID1 vs ID2)")
     plt.xlabel("x (pixels)")
     plt.ylabel("y (pixels)")
-    plt.legend(handles=[line1, line2], loc="best", frameon=False)
+    plt.legend(handles=[line1, line2], loc="lower left", frameon=False)
     plt.tight_layout()
     plt.savefig(pdf_path)
     plt.close()
@@ -318,7 +318,7 @@ def process_trajectories(csv_path: str,
 
     # PDF
     if has_id1_id2:
-        pdf_path = f"{base}_tracks.pdf"
+        pdf_path = f"{base}_tracks_{int(threshold_px)}px_{fps:.0f}fps.pdf"
         make_tracks_pdf(df, pdf_path)
     else:
         pdf_path = "(no ID1/ID2, PDF not written)"
