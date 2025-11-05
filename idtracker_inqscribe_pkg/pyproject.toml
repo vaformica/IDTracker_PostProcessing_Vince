@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "idtracker-inqscribe"
+version = "0.1.0"
+description = "Convert IDTracker trajectories.csv to InqScribe events and frame-based QA tables"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [
+  {name = "Vince Formica & ChatGPT"}
+]
+license = {text = "MIT"}
+dependencies = [
+  "pandas>=1.4",
+  "numpy>=1.22",
+  "matplotlib>=3.5"
+]
+
+[project.urls]
+Homepage = "https://example.com/idtracker-inqscribe"
+Source = "https://example.com/idtracker-inqscribe"
+
+[project.scripts]
+idtracker-to-inqscribe = "idtracker_inqscribe.cli:main"

@@ -1,0 +1,19 @@
+﻿Start Time	End Time	Title	Comment
+00:00:00,000	00:00:30,100	NaN: both IDs missing [F0–F903]	duration=904 frames
+00:01:21,233	00:01:21,900	Proximity: ID1-ID2 [F2437–F2457]	distance <= 60px; duration=21 frames; both valid
+00:01:21,933	00:01:22,567	NaN: ID1 missing [F2458–F2477]	duration=20 frames
+00:01:22,600	00:01:23,800	NaN: ID2 missing [F2478–F2514]	duration=37 frames
+00:01:23,833	00:01:26,433	NaN: ID1 missing [F2515–F2593]	duration=79 frames
+00:01:26,467	00:01:28,567	Proximity: ID1-ID2 [F2594–F2657]	distance <= 60px; duration=64 frames; both valid
+00:01:29,733	00:01:30,367	Proximity: ID1-ID2 [F2692–F2711]	distance <= 60px; duration=20 frames; both valid
+00:02:23,767	00:02:25,967	Proximity: ID1-ID2 [F4313–F4379]	distance <= 60px; duration=67 frames; both valid
+00:02:26,000	00:02:27,633	NaN: ID1 missing [F4380–F4429]	duration=50 frames
+00:02:27,667	00:02:27,800	Proximity: ID1-ID2 [F4430–F4434]	distance <= 60px; duration=5 frames; both valid
+00:03:14,167	00:03:14,633	Proximity: ID1-ID2 [F5825–F5839]	distance <= 60px; duration=15 frames; both valid
+00:03:17,667	00:03:17,867	NaN: ID1 missing [F5930–F5936]	duration=7 frames
+00:03:18,000	00:03:18,167	Proximity: ID1-ID2 [F5940–F5945]	distance <= 60px; duration=6 frames; both valid
+00:03:18,200	00:03:18,267	NaN: ID1 missing [F5946–F5948]	duration=3 frames
+00:03:45,467	00:03:45,800	Proximity: ID1-ID2 [F6764–F6774]	distance <= 60px; duration=11 frames; both valid
+00:03:45,967	00:03:46,200	Proximity: ID1-ID2 [F6779–F6786]	distance <= 60px; duration=8 frames; both valid
+00:04:39,167	00:04:40,033	Proximity: ID1-ID2 [F8375–F8401]	distance <= 60px; duration=27 frames; both valid
+00:05:21,667	00:05:22,067	NaN: ID1 missing [F9650–F9662]	duration=13 frames
