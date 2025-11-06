@@ -244,100 +244,75 @@ def process_trajectories(csv_path: str,
     frames = np.arange(num_frames, dtype=int)
     time_seconds = frames / fps
 
-    has_id1_id2 = {1, 2}.issubset(set(ids))
+    # Precompute per-ID coords and validity
+    per_id = {}
+    for i in ids:
+        xi = df[f"x{i}"]
+        yi = df[f"y{i}"]
+        valid = ~(xi.isna() | yi.isna())
+        per_id[i] = {"x": xi, "y": yi, "valid": valid}
 
-    if has_id1_id2:
-        x1, y1 = df["x1"], df["y1"]
-        x2, y2 = df["x2"], df["y2"]
-
-        valid1 = ~(x1.isna() | y1.isna())
-        valid2 = ~(x2.isna() | y2.isna())
-        both_valid = valid1 & valid2
-
-        distance_px = np.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2)
-
-        proximity_mask = (distance_px <= threshold_px) & both_valid
-        proximity_segments = segment_mask_frames(proximity_mask.values, min_frames)
-
-        # NaNs
-        nan1_mask = ~valid1.values
-        nan2_mask = ~valid2.values
-        both_nan_mask = nan1_mask & nan2_mask
-        id1_only_mask = nan1_mask & ~both_nan_mask
-        id2_only_mask = nan2_mask & ~both_nan_mask
-
-        both_nan_segments = segment_mask_frames(both_nan_mask, min_frames)
-        id1_nan_segments = segment_mask_frames(id1_only_mask, min_frames)
-        id2_nan_segments = segment_mask_frames(id2_only_mask, min_frames)
-
-        events = []
-        for s, e in proximity_segments:
+    # Build events for all pairs and all NaN runs
+    events = []
+    for idx_i in range(len(ids)):
+        i = ids[idx_i]
+        for idx_j in range(idx_i + 1, len(ids)):
+            j = ids[idx_j]
+            xi = per_id[i]["x"]
+            yi = per_id[i]["y"]
+            xj = per_id[j]["x"]
+            yj = per_id[j]["y"]
+            valid_i = per_id[i]["valid"]
+            valid_j = per_id[j]["valid"]
+            both_valid = valid_i & valid_j
+            distance_px = np.sqrt((xi - xj) ** 2 + (yi - yj) ** 2)
+            proximity_mask = (distance_px <= threshold_px) & both_valid
+            proximity_segments = segment_mask_frames(proximity_mask.values, min_frames)
+            for s, e in proximity_segments:
+                events.append(
+                    (
+                        time_seconds[s],
+                        time_seconds[e],
+                        f"Proximity: ID{i}-ID{j} [F{s}–F{e}]",
+                        f"distance <= {int(threshold_px)}px; duration={e - s + 1} frames; IDs {i},{j} valid",
+                    )
+                )
+    # NaN detection for each individual ID
+    for i in ids:
+        valid_i = per_id[i]["valid"]
+        nan_mask = ~valid_i.values
+        nan_segments = segment_mask_frames(nan_mask, min_frames)
+        for s, e in nan_segments:
             events.append(
                 (
                     time_seconds[s],
                     time_seconds[e],
-                    f"Proximity: ID1-ID2 [F{s}–F{e}]",
-                    f"distance <= {int(threshold_px)}px; duration={e - s + 1} frames; both valid",
+                    f"NaN: ID{i} missing [F{s}–F{e}]",
+                    f"ID{i} missing for {e - s + 1} frames",
                 )
             )
-        for s, e in both_nan_segments:
-            events.append(
-                (
-                    time_seconds[s],
-                    time_seconds[e],
-                    f"NaN: both IDs missing [F{s}–F{e}]",
-                    f"duration={e - s + 1} frames",
-                )
-            )
-        for s, e in id1_nan_segments:
-            events.append(
-                (
-                    time_seconds[s],
-                    time_seconds[e],
-                    f"NaN: ID1 missing [F{s}–F{e}]",
-                    f"duration={e - s + 1} frames",
-                )
-            )
-        for s, e in id2_nan_segments:
-            events.append(
-                (
-                    time_seconds[s],
-                    time_seconds[e],
-                    f"NaN: ID2 missing [F{s}–F{e}]",
-                    f"duration={e - s + 1} frames",
-                )
-            )
-
-        events.sort(key=lambda r: (r[0], r[1], r[2]))
-    else:
-        events = []
+    events.sort(key=lambda r: (r[0], r[1], r[2]))
 
     # build base name in output dir
     base_name = os.path.splitext(os.path.basename(csv_path))[0]
     base = os.path.join(output_dir, base_name)
 
-    # InqScribe
-    if has_id1_id2:
-        inq_path = f"{base}_InqScribe_{int(threshold_px)}px_{fps:.0f}fps.txt"
-        with open(inq_path, "w", encoding="utf-8-sig", newline="\n") as f:
-            w = csv.writer(f, delimiter="\t", lineterminator="\n")
-            w.writerow(["Start Time", "End Time", "Title", "Comment"])
-            for start_s, end_s, title, comment in events:
-                w.writerow([
-                    fmt_hhmmss_comma_ms(start_s),
-                    fmt_hhmmss_comma_ms(end_s),
-                    title,
-                    comment,
-                ])
-    else:
-        inq_path = "(no ID1/ID2, InqScribe not written)"
+    # InqScribe: always write
+    inq_path = f"{base}_InqScribe_{int(threshold_px)}px_{fps:.0f}fps.txt"
+    with open(inq_path, "w", encoding="utf-8-sig", newline="\n") as f:
+        w = csv.writer(f, delimiter="\t", lineterminator="\n")
+        w.writerow(["Start Time", "End Time", "Title", "Comment"])
+        for start_s, end_s, title, comment in events:
+            w.writerow([
+                fmt_hhmmss_comma_ms(start_s),
+                fmt_hhmmss_comma_ms(end_s),
+                title,
+                comment,
+            ])
 
-    # PDF
-    if has_id1_id2:
-        pdf_path = f"{base}_tracks_{int(threshold_px)}px_{fps:.0f}fps.pdf"
-        make_tracks_pdf(df, pdf_path)
-    else:
-        pdf_path = "(no ID1/ID2, PDF not written)"
+    # PDF (leave logic unchanged, always plot all IDs)
+    pdf_path = f"{base}_tracks_{int(threshold_px)}px_{fps:.0f}fps.pdf"
+    make_tracks_pdf(df, pdf_path)
 
     # Pairwise
     pairwise_path = write_pairwise_distances(df, ids, base, fps, threshold_px)
