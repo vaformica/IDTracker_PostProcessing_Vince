@@ -95,47 +95,63 @@ def discover_ids(df: pd.DataFrame):
 
 def make_tracks_pdf(df: pd.DataFrame, pdf_path: str):
     """
-    Draw ID1 and ID2, mark start (triangle) and end (circle),
-    markers same color as line, legend only lines.
+    Draw trajectories for all detected IDs (x1,y1 ... x12,y12).
+    - Plots every ID's path
+    - Still marks start/end for ID1 and ID2 (your primary pair)
+    - Legend in lower-left so it doesn't occlude
     """
-    if not {"x1", "y1", "x2", "y2"}.issubset(df.columns):
+    # find all IDs present
+    ids = []
+    for col in df.columns:
+        # look for xN / yN pattern
+        import re as _re
+        m = _re.fullmatch(r"x(\d+)", col)
+        if m:
+            idx = int(m.group(1))
+            if f"y{idx}" in df.columns:
+                ids.append(idx)
+    ids = sorted(ids)
+    if not ids:
         return
 
-    x1, y1 = df["x1"], df["y1"]
-    x2, y2 = df["x2"], df["y2"]
-
     plt.figure(figsize=(6, 6))
-    line1, = plt.plot(x1, y1, "-", linewidth=1.5, alpha=0.9, label="ID1")
-    line2, = plt.plot(x2, y2, "-", linewidth=1.5, alpha=0.9, label="ID2")
+    line_handles = []
 
-    color1 = line1.get_color()
-    color2 = line2.get_color()
+    # plot every ID we found
+    for i in ids:
+        x = df[f"x{i}"]
+        y = df[f"y{i}"]
+        (line,) = plt.plot(x, y, '-', linewidth=1.2, alpha=0.9, label=f"ID{i}")
+        line_handles.append(line)
 
-    # ID1 start/end
-    valid_id1 = (~x1.isna()) & (~y1.isna())
-    if valid_id1.any():
-        first_id1 = valid_id1.idxmax()
-        plt.scatter([x1.iloc[first_id1]], [y1.iloc[first_id1]],
-                    s=70, marker="^", color=color1, edgecolor="black", linewidth=0.5)
-        last_id1 = np.where(valid_id1.values)[0][-1]
-        plt.scatter([x1.iloc[last_id1]], [y1.iloc[last_id1]],
-                    s=70, marker="o", color=color1, edgecolor="black", linewidth=0.5)
+    # mark starts/ends for ID1 and ID2 if present
+    for i, color_line in [(1, None), (2, None)]:
+        if f"x{i}" in df.columns and f"y{i}" in df.columns:
+            x = df[f"x{i}"]
+            y = df[f"y{i}"]
+            valid = (~x.isna()) & (~y.isna())
+            if valid.any():
+                # get the line color we used above
+                # find the corresponding handle
+                handle = None
+                for h in line_handles:
+                    if h.get_label() == f"ID{i}":
+                        handle = h
+                        break
+                color = handle.get_color() if handle is not None else None
 
-    # ID2 start/end
-    valid_id2 = (~x2.isna()) & (~y2.isna())
-    if valid_id2.any():
-        first_id2 = valid_id2.idxmax()
-        plt.scatter([x2.iloc[first_id2]], [y2.iloc[first_id2]],
-                    s=70, marker="^", color=color2, edgecolor="black", linewidth=0.5)
-        last_id2 = np.where(valid_id2.values)[0][-1]
-        plt.scatter([x2.iloc[last_id2]], [y2.iloc[last_id2]],
-                    s=70, marker="o", color=color2, edgecolor="black", linewidth=0.5)
+                first_idx = valid.idxmax()
+                plt.scatter([x.iloc[first_idx]], [y.iloc[first_idx]],
+                            s=70, marker='^', color=color, edgecolor='black', linewidth=0.5)
+                last_idx = np.where(valid.values)[0][-1]
+                plt.scatter([x.iloc[last_idx]], [y.iloc[last_idx]],
+                            s=70, marker='o', color=color, edgecolor='black', linewidth=0.5)
 
     plt.gca().invert_yaxis()
-    plt.title("Tracked paths (ID1 vs ID2)")
+    plt.title("Tracked paths (all IDs)")
     plt.xlabel("x (pixels)")
     plt.ylabel("y (pixels)")
-    plt.legend(handles=[line1, line2], loc="lower left", frameon=False)
+    plt.legend(handles=line_handles, loc="lower left", frameon=False)
     plt.tight_layout()
     plt.savefig(pdf_path)
     plt.close()

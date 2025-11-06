@@ -59,7 +59,7 @@ A quick check is to load a representative video frame in Fiji/ImageJ and measure
 
 3. **Min contact duration (s)** – the minimum time that two animals must remain within the distance threshold for the script to register an event. This helps filter out brief, incidental passes.
 
-In your implementation the frame rate is fixed at 30 fps, so a duration of 0.2 s corresponds to 6 frames. This roughly translates to six tenths of a second in real time, which seems reasonable for many interactions. If you want to capture briefer contacts, you could lower the duration to 0.1 s (about 3 frames), but very short durations may include spurious touches; if you’re concerned about missing longer interactions, increase the value accordingly.
+In your implementation the frame rate is fixed at 30 fps, so a duration of 0.2 s corresponds to 6 frames. This  translates to six seconds in real time (since we record 1 frame per second), which seems reasonable for many interactions. If you want to capture briefer contacts, you could lower the duration to 0.1 s (about 3 frames, or 3 seconds in real time), but very short durations may include spurious touches; if you’re concerned about missing longer interactions, increase the value accordingly.
 
 4. **Output directory** – the folder where the generated files (InqScribe table, tracks PDF, and pairwise distances CSV) will be saved. If you leave it blank, the script defaults to the same directory as the input CSV.
 
