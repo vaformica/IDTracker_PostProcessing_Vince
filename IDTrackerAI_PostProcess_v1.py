@@ -419,9 +419,9 @@ def write_roi_outputs(df: pd.DataFrame, rois, beetle_ids, fps: float, out_base: 
             "frames_in_roi",
             "pct_time_in_roi",
             "dist_in_roi_px",
-            "total_frames",
             "median_speed_10f_px_per_frame",
             "video_total_frames",
+            "entries_into_roi",
         ]
         w = csv.DictWriter(f, fieldnames=fieldnames)
         w.writeheader()
@@ -431,15 +431,20 @@ def write_roi_outputs(df: pd.DataFrame, rois, beetle_ids, fps: float, out_base: 
                 fin = frames_in_roi[bid][roi_name]
                 pct = fin / num_frames if num_frames else 0.0
                 median_speed = _median_speed_over_10_frames(roi_speeds[bid][roi_name])
+                # Count the number of ENTER events for this beetle and ROI
+                entries_count = sum(
+                    1 for ev in events
+                    if ev["beetle_id"] == bid and ev["roi_name"] == roi_name and ev["event_type"] == "ENTER"
+                )
                 w.writerow({
                     "beetle_id": bid,
                     "roi_name": roi_name,
                     "frames_in_roi": fin,
                     "pct_time_in_roi": pct,
                     "dist_in_roi_px": dist_in_roi[bid][roi_name],
-                    "total_frames": num_frames,
                     "median_speed_10f_px_per_frame": median_speed,
                     "video_total_frames": num_frames,
+                    "entries_into_roi": entries_count,
                 })
 
     return events_path, summary_path
@@ -1217,9 +1222,9 @@ def write_roi_outputs(df: pd.DataFrame, rois, beetle_ids, fps: float, out_base: 
             "frames_in_roi",
             "pct_time_in_roi",
             "dist_in_roi_px",
-            "total_frames",
             "median_speed_10f_px_per_frame",
             "video_total_frames",
+            "entries_into_roi",
         ]
         w = csv.DictWriter(f, fieldnames=fieldnames)
         w.writeheader()
@@ -1229,15 +1234,17 @@ def write_roi_outputs(df: pd.DataFrame, rois, beetle_ids, fps: float, out_base: 
                 fin = frames_in_roi[bid][roi_name]
                 pct = fin / num_frames if num_frames else 0.0
                 median_speed = _median_speed_over_10_frames(roi_speeds[bid][roi_name])
+                # Count the number of ENTER events for this beetle and ROI
+                entries_count = sum(1 for ev in events if ev["beetle_id"] == bid and ev["roi_name"] == roi_name and ev["event_type"] == "ENTER")
                 w.writerow({
                     "beetle_id": bid,
                     "roi_name": roi_name,
                     "frames_in_roi": fin,
                     "pct_time_in_roi": pct,
                     "dist_in_roi_px": dist_in_roi[bid][roi_name],
-                    "total_frames": num_frames,
                     "median_speed_10f_px_per_frame": median_speed,
                     "video_total_frames": num_frames,
+                    "entries_into_roi": entries_count,
                 })
     return events_path, summary_path
 
