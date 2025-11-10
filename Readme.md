@@ -12,8 +12,9 @@ Before running the script, ensure your selected directory is the same folder pro
 
 These two files are essential; the script will not proceed without them.
 
-![Example InqScribe output](./inqscribe_example.jpeg)
+<img src="./inqscribe_example.jpeg" alt="Example InqScribe output" width="600" />
 *Figure 1: Example of the InqScribe output showing proximity and NaN events over time for a single video. Each line corresponds to an event with start and end times, enabling playback‑based annotation of interactions.*
+_Ensure `inqscribe_example.jpeg` is saved in the same directory as this README so the image renders on GitHub._
 
 ![Example tracked paths](./Test_trajectories_tracks.png)
 *Figure 2: Example of the combined page in the output PDF. Each beetle’s trajectory is plotted in a unique color, with triangles marking starting positions and circles marking ending positions. The black boxes represent ROIs corresponding to the arena and fungus brackets.*
