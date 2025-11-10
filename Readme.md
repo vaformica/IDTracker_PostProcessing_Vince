@@ -86,7 +86,8 @@ The script produces several files summarizing spatial, temporal, and interaction
    - Useful for quantifying behavioral transitions or detecting when beetles move on/off fungus brackets.
 
 5. **ROI Summary CSV** (`*_roi_summary.csv`)
-   - A summary of how much time each beetle spent within each ROI, the distance they traveled inside it, and the total video duration.
+   - A summary of how much time each beetle spent within each ROI, the distance they traveled inside it, their median speed (calculated over 10‑frame windows) while inside that ROI, and the total number of frames in the video.
+   - This file accounts for nested ROIs correctly — for example, the main arena contains all bracket regions, so a beetle inside a bracket is also counted as inside the arena.
 
 All files are saved into the same `Post_Processing_Output` directory unless you choose another location.
 
@@ -129,7 +130,8 @@ All files are saved into the same `Post_Processing_Output` directory unless you 
 | frames_in_roi | Number of frames the beetle was inside the ROI |
 | pct_time_in_roi | Fraction of total frames spent in the ROI (0–1) |
 | dist_in_roi_px | Total distance traveled (in pixels) while inside the ROI |
-| total_frames | Total number of frames in the video |
+| median_speed_10f_px_per_frame | Median speed (in pixels/frame) over 10‑frame rolling windows while the beetle was inside the ROI |
+| video_total_frames | Total number of frames in the video (same for all rows; included for clarity) |
 
 ## CLI Fallback
 
