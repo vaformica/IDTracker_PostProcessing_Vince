@@ -84,3 +84,8 @@ On macOS, you may need to install Python from python.org to get a working tkinte
 ## License
 
 This project is licensed under the MIT License. See the LICENSE file for details.
+
+## Next Steps
+- Fix shape of graph so it is not a square
+- Run a bunch of tracking runs on differnt cells
+- 
