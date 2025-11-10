@@ -4,20 +4,12 @@
 
 This GUI allows you to load the outputs from IDTrackerAI and manually correct any misidentifications or errors in the tracking data. It is designed to streamline the post-processing of animal tracking data by providing an intuitive interface to review and edit the results.
 
-## What the Script Produces
+## Input and Outputs
 
 Before running the script, ensure your selected directory is the same folder produced by IDTracker.ai for a specific video. This folder must include:
 - `trajectories.csv` — The tracked coordinates of all individuals across frames.
 - `.toml` — The ROI definitions describing the arena and any fungus brackets.
 These two files are essential; the script will not proceed without them.
-
-- A **pairwise distances CSV** file containing distances between all tracked beetles across all frames. This allows further quantitative analysis of proximity patterns and interactions over time.
-
-- An **InqScribe‑ready tab‑delimited text file** that can be imported directly into InqScribe. This file now includes proximity events for all pairs of beetles (not just ID1 and ID2), as well as periods where any beetle’s position data are missing (NAs). These NAs often indicate fights or overlapping individuals where IDTracker.ai temporarily lost track of one or both beetles.
-
-- A **multi-page PDF visualization** showing the tracked paths of each beetle. Each beetle has its own page with its individual trajectory (color-coded consistently across pages), and the final page shows all beetles combined. The axes are scaled equally and share the same limits across all pages to preserve spatial proportions. Black polygons show the ROIs (the arena and individual fungus brackets).
-  ![Example tracked paths](./example_tracks_output.png)
-  *Figure: Example of the combined page in the output PDF. Each beetle’s trajectory is plotted in a unique color, with triangles marking starting positions and circles marking ending positions.*
 
 All outputs are saved in the `Post_Processing_Output` directory by default.
 
