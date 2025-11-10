@@ -30,6 +30,9 @@ except Exception:
 import pandas as pd
 import numpy as np
 
+import tomllib
+import math
+
 
 import matplotlib
 matplotlib.use("Agg")
@@ -95,7 +98,7 @@ def discover_ids(df: pd.DataFrame):
     return sorted(ids)
 
 
-def make_tracks_pdf(df: pd.DataFrame, pdf_path: str):
+def make_tracks_pdf(df: pd.DataFrame, pdf_path: str, rois=None):
     """
     Create a multi-page PDF:
     - One page per individual ID (xN,yN)
@@ -155,6 +158,12 @@ def make_tracks_pdf(df: pd.DataFrame, pdf_path: str):
             x = df[f"x{i}"]
             y = df[f"y{i}"]
             fig, ax = plt.subplots(figsize=(6, 6))
+            # Draw ROIs if provided
+            if rois:
+                from matplotlib.patches import Polygon as _Polygon
+                for roi in rois:
+                    poly = roi["poly"]
+                    ax.add_patch(_Polygon(poly, closed=True, fill=False, edgecolor="black", linewidth=1.0, alpha=0.6))
             color = id_to_color[i]
             ax.plot(x, y, '-', linewidth=1.4, alpha=0.9, label=f"ID{i}", color=color)
 
@@ -184,6 +193,12 @@ def make_tracks_pdf(df: pd.DataFrame, pdf_path: str):
 
         # 2) final page with all IDs together
         fig, ax = plt.subplots(figsize=(6, 6))
+        # Draw ROIs if provided
+        if rois:
+            from matplotlib.patches import Polygon as _Polygon
+            for roi in rois:
+                poly = roi["poly"]
+                ax.add_patch(_Polygon(poly, closed=True, fill=False, edgecolor="black", linewidth=1.0, alpha=0.6))
         line_handles = []
         for i in ids:
             x = df[f"x{i}"]
@@ -274,11 +289,139 @@ def write_pairwise_distances(df: pd.DataFrame, ids, base: str,
     return out_path
 
 
+# ==============================
+# ROI HELPER FUNCTIONS
+# ==============================
+def parse_roi_string(s: str):
+    import re as _re
+    m = _re.search(r"\[\s*\[.*\]\s*\]", s)
+    if not m:
+        raise ValueError(f"Could not parse ROI polygon from: {s}")
+    coords = eval(m.group(0), {"__builtins__": {}})
+    return [(float(x), float(y)) for (x, y) in coords]
+
+def load_rois_from_toml(toml_path: str):
+    with open(toml_path, "rb") as f:
+        data = tomllib.load(f)
+    roi_list = data.get("roi_list")
+    if not roi_list:
+        raise ValueError("No 'roi_list' found in TOML")
+    rois = []
+    for idx, roi_str in enumerate(roi_list):
+        poly = parse_roi_string(roi_str)
+        if idx == 0:
+            name = "arena"
+        else:
+            name = f"bracket{idx}"
+        rois.append({"name": name, "poly": poly})
+    return rois
+
+def point_in_poly(x, y, poly):
+    inside = False
+    n = len(poly)
+    for i in range(n):
+        x1, y1 = poly[i]
+        x2, y2 = poly[(i + 1) % n]
+        cond = ((y1 > y) != (y2 > y))
+        if cond:
+            xinters = (x2 - x1) * (y - y1) / (y2 - y1 + 1e-12) + x1
+            if x <= xinters:
+                inside = not inside
+    return inside
+
+def write_roi_outputs(df: pd.DataFrame, rois, beetle_ids, fps: float, out_base: str):
+    num_frames = len(df)
+    # init state
+    prev_inside = {bid: {roi["name"]: False for roi in rois} for bid in beetle_ids}
+    frames_in_roi = {bid: {roi["name"]: 0 for roi in rois} for bid in beetle_ids}
+    dist_in_roi = {bid: {roi["name"]: 0.0 for roi in rois} for bid in beetle_ids}
+    prev_pos = {bid: (math.nan, math.nan) for bid in beetle_ids}
+    events = []
+    for frame_idx, row in df.iterrows():
+        t_s = frame_idx / fps
+        for bid in beetle_ids:
+            x = row[f"x{bid}"]
+            y = row[f"y{bid}"]
+            valid = not (math.isnan(x) or math.isnan(y))
+            for roi in rois:
+                roi_name = roi["name"]
+                if valid:
+                    inside = point_in_poly(x, y, roi["poly"])
+                else:
+                    inside = False
+                was_inside = prev_inside[bid][roi_name]
+                if inside:
+                    frames_in_roi[bid][roi_name] += 1
+                if inside and not was_inside:
+                    events.append({
+                        "frame": frame_idx,
+                        "time_s": t_s,
+                        "beetle_id": bid,
+                        "roi_name": roi_name,
+                        "event_type": "ENTER",
+                    })
+                elif (not inside) and was_inside:
+                    events.append({
+                        "frame": frame_idx,
+                        "time_s": t_s,
+                        "beetle_id": bid,
+                        "roi_name": roi_name,
+                        "event_type": "EXIT",
+                    })
+                prev_inside[bid][roi_name] = inside
+            # distance inside rois
+            prev_x, prev_y = prev_pos[bid]
+            if valid and not (math.isnan(prev_x) or math.isnan(prev_y)):
+                step = math.hypot(x - prev_x, y - prev_y)
+                for roi in rois:
+                    roi_name = roi["name"]
+                    if prev_inside[bid][roi_name]:
+                        dist_in_roi[bid][roi_name] += step
+            prev_pos[bid] = (x, y)
+    # write events
+    events_path = f"{out_base}_roi_events.csv"
+    with open(events_path, "w", newline="", encoding="utf-8") as f:
+        import csv as _csv
+        w = _csv.DictWriter(f, fieldnames=["frame", "time_s", "beetle_id", "roi_name", "event_type"])
+        w.writeheader()
+        for ev in events:
+            w.writerow(ev)
+    # write summary
+    summary_path = f"{out_base}_roi_summary.csv"
+    with open(summary_path, "w", newline="", encoding="utf-8") as f:
+        import csv as _csv
+        fieldnames = [
+            "beetle_id",
+            "roi_name",
+            "frames_in_roi",
+            "pct_time_in_roi",
+            "dist_in_roi_px",
+            "total_frames",
+        ]
+        w = _csv.DictWriter(f, fieldnames=fieldnames)
+        w.writeheader()
+        for bid in beetle_ids:
+            for roi in rois:
+                roi_name = roi["name"]
+                fin = frames_in_roi[bid][roi_name]
+                pct = fin / num_frames if num_frames else 0.0
+                w.writerow({
+                    "beetle_id": bid,
+                    "roi_name": roi_name,
+                    "frames_in_roi": fin,
+                    "pct_time_in_roi": pct,
+                    "dist_in_roi_px": dist_in_roi[bid][roi_name],
+                    "total_frames": num_frames,
+                })
+    return events_path, summary_path
+
+
 def process_trajectories(csv_path: str,
                          fps: float,
                          threshold_px: float,
                          min_frames: int,
-                         output_dir: str):
+                         output_dir: str,
+                         toml_path: str | None = None):
     """
     Core logic. All configurable values passed in.
     """
@@ -358,14 +501,25 @@ def process_trajectories(csv_path: str,
                 comment,
             ])
 
-    # PDF (leave logic unchanged, always plot all IDs)
+    # ROI loading (move up to before PDF)
+    rois = None
+    if toml_path is not None and toml_path != "":
+        rois = load_rois_from_toml(toml_path)
+
+    # PDF (now pass rois)
     pdf_path = f"{base}_tracks_{int(threshold_px)}px_{fps:.0f}fps.pdf"
-    make_tracks_pdf(df, pdf_path)
+    make_tracks_pdf(df, pdf_path, rois if toml_path else None)
 
     # Pairwise
     pairwise_path = write_pairwise_distances(df, ids, base, fps, threshold_px)
 
-    return inq_path, pdf_path, pairwise_path, len(events)
+    roi_events_path = None
+    roi_summary_path = None
+    if rois is not None:
+        base_for_roi = os.path.join(output_dir, base_name)
+        roi_events_path, roi_summary_path = write_roi_outputs(df, rois, ids, fps, base_for_roi)
+
+    return inq_path, pdf_path, pairwise_path, roi_events_path, roi_summary_path, len(events)
 
 
 # ==============================
@@ -377,6 +531,7 @@ def run_gui():
 
     # vars
     csv_var = tk.StringVar()
+    toml_var = tk.StringVar()
     thresh_var = tk.StringVar(value="60")
     dur_var = tk.StringVar(value="0.2")  # seconds
     outdir_var = tk.StringVar()
@@ -429,20 +584,21 @@ def run_gui():
 
         fps = 30.0  # fixed, you can add a box later
         min_frames = max(1, int(round(dur_seconds * fps)))
-
+        toml_path = toml_var.get().strip()
         try:
-            inq_path, pdf_path, pairwise_path, n_events = process_trajectories(
+            inq_path, pdf_path, pairwise_path, roi_events_path, roi_summary_path, n_events = process_trajectories(
                 csv_path,
                 fps=fps,
                 threshold_px=threshold_px,
                 min_frames=min_frames,
                 output_dir=out_dir,
+                toml_path=toml_path,
             )
-            messagebox.showinfo(
-                "Success",
-                f"Created:\n{inq_path}\n{pdf_path}\n{pairwise_path}\n\n"
-                f"ID1–ID2 events: {n_events}",
-            )
+            msg = f"Created:\n{inq_path}\n{pdf_path}\n{pairwise_path}\n"
+            if roi_events_path:
+                msg += f"{roi_events_path}\n{roi_summary_path}\n"
+            msg += f"\nEvents: {n_events}"
+            messagebox.showinfo("Success", msg)
             root.destroy()
         except Exception as e:
             messagebox.showerror("Error", str(e))
@@ -457,21 +613,26 @@ def run_gui():
     tk.Entry(frm, textvariable=csv_var, width=50).grid(row=0, column=1, sticky="we")
     tk.Button(frm, text="Browse…", command=choose_csv).grid(row=0, column=2, padx=5)
 
+    # ROI TOML
+    tk.Label(frm, text="ROI TOML file:").grid(row=1, column=0, sticky="w")
+    tk.Entry(frm, textvariable=toml_var, width=50).grid(row=1, column=1, sticky="we")
+    tk.Button(frm, text="Browse…", command=lambda: toml_var.set(filedialog.askopenfilename(title="Select ROI TOML", filetypes=[("TOML files", "*.toml"), ("All files", "*.*")]))).grid(row=1, column=2, padx=5)
+
     # threshold
-    tk.Label(frm, text="Distance threshold (px):").grid(row=1, column=0, sticky="w")
-    tk.Entry(frm, textvariable=thresh_var, width=10).grid(row=1, column=1, sticky="w")
+    tk.Label(frm, text="Distance threshold (px):").grid(row=2, column=0, sticky="w")
+    tk.Entry(frm, textvariable=thresh_var, width=10).grid(row=2, column=1, sticky="w")
 
     # duration
-    tk.Label(frm, text="Min contact duration (s):").grid(row=2, column=0, sticky="w")
+    tk.Label(frm, text="Min contact duration (s):").grid(row=3, column=0, sticky="w")
     dur_entry = tk.Entry(frm, textvariable=dur_var, width=10)
-    dur_entry.grid(row=2, column=1, sticky="w")
+    dur_entry.grid(row=3, column=1, sticky="w")
     dur_entry.bind("<FocusOut>", update_frames_hint)
-    tk.Label(frm, textvariable=frames_hint_var, fg="#555").grid(row=2, column=2, sticky="w")
+    tk.Label(frm, textvariable=frames_hint_var, fg="#555").grid(row=3, column=2, sticky="w")
 
     # output dir
-    tk.Label(frm, text="Output directory:").grid(row=3, column=0, sticky="w")
-    tk.Entry(frm, textvariable=outdir_var, width=50).grid(row=3, column=1, sticky="we")
-    tk.Button(frm, text="Choose…", command=choose_outdir).grid(row=3, column=2, padx=5)
+    tk.Label(frm, text="Output directory:").grid(row=4, column=0, sticky="w")
+    tk.Entry(frm, textvariable=outdir_var, width=50).grid(row=4, column=1, sticky="we")
+    tk.Button(frm, text="Choose…", command=choose_outdir).grid(row=4, column=2, padx=5)
 
     # run button
     tk.Button(
@@ -479,7 +640,7 @@ def run_gui():
         text="Run",
         width=12,
         command=do_run
-    ).grid(row=4, column=0, columnspan=3, pady=10, sticky="we")
+    ).grid(row=5, column=0, columnspan=3, pady=10, sticky="we")
 
     frm.columnconfigure(1, weight=1)
 
@@ -498,19 +659,24 @@ def main():
         if not csv_path or not os.path.exists(csv_path):
             print("File not found, exiting.")
             return
+        toml_path = input("Path to ROI TOML (or leave blank): ").strip()
         out_dir = os.path.dirname(csv_path)
         try:
-            inq_path, pdf_path, pairwise_path, n_events = process_trajectories(
+            inq_path, pdf_path, pairwise_path, roi_events_path, roi_summary_path, n_events = process_trajectories(
                 csv_path,
                 fps=30.0,
                 threshold_px=60.0,
                 min_frames=int(round(0.2 * 30.0)),
                 output_dir=out_dir,
+                toml_path=toml_path,
             )
             print("Created:")
             print(inq_path)
             print(pdf_path)
             print(pairwise_path)
+            if roi_events_path:
+                print(roi_events_path)
+                print(roi_summary_path)
             print("ID1–ID2 events:", n_events)
         except Exception as e:
             print("ERROR:", e)
