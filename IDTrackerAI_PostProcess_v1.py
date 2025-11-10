@@ -5,19 +5,25 @@ IDTrackerAI_PostProcess_v1.py
 GUI version of the IDTracker → InqScribe converter
 with user-configurable:
 - trajectories file
+- ROI TOML file
 - distance threshold (px)
 - min contact duration (seconds)
-- output directory (defaults to directory of trajectories file)
+- output directory (defaults to Post_Processing_Output next to the trajectories file, or inside selected base dir)
+- optional base directory scan to auto-find trajectories.csv and .toml
 
 Outputs:
 1) <outdir>/<basename>_InqScribe_<thresh}px_<fps>fps.txt
-2) <outdir>/<basename>_tracks.pdf
+2) <outdir>/<basename>_tracks_<thresh}px_<fps>fps.pdf  (multi-page, ROIs underneath)
 3) <outdir>/<basename>_pairwise_distances_<thresh}px_<fps>fps.csv
+4) <outdir>/<basename>_roi_events.csv              (if TOML provided)
+5) <outdir>/<basename>_roi_summary.csv             (if TOML provided)
 """
 
 import os
 import re
 import csv
+import math
+from pathlib import Path
 
 # --- try tkinter, but fall back to CLI if missing ---
 try:
@@ -29,10 +35,7 @@ except Exception:
 
 import pandas as pd
 import numpy as np
-
 import tomllib
-import math
-
 
 import matplotlib
 matplotlib.use("Agg")
@@ -104,12 +107,12 @@ def make_tracks_pdf(df: pd.DataFrame, pdf_path: str, rois=None):
     - One page per individual ID (xN,yN)
     - One final page with all IDs together
     Colors are consistent across pages, and all pages use the same x/y limits.
+    If ROIs are provided, draw them in black underneath on every page.
     """
     # find all IDs present
     ids = []
     for col in df.columns:
-        import re as _re
-        m = _re.fullmatch(r"x(\d+)", col)
+        m = re.fullmatch(r"x(\d+)", col)
         if m:
             idx = int(m.group(1))
             if f"y{idx}" in df.columns:
@@ -126,11 +129,10 @@ def make_tracks_pdf(df: pd.DataFrame, pdf_path: str, rois=None):
         y = df[f"y{i}"]
         all_x_list.append(x.to_numpy(dtype=float))
         all_y_list.append(y.to_numpy(dtype=float))
-    import numpy as _np
-    all_x = _np.concatenate([_np.array(a, dtype=float) for a in all_x_list])
-    all_y = _np.concatenate([_np.array(a, dtype=float) for a in all_y_list])
-    all_x = all_x[~_np.isnan(all_x)]
-    all_y = all_y[~_np.isnan(all_y)]
+    all_x = np.concatenate([np.array(a, dtype=float) for a in all_x_list])
+    all_y = np.concatenate([np.array(a, dtype=float) for a in all_y_list])
+    all_x = all_x[~np.isnan(all_x)]
+    all_y = all_y[~np.isnan(all_y)]
     if all_x.size > 0 and all_y.size > 0:
         xmin, xmax = all_x.min(), all_x.max()
         ymin, ymax = all_y.min(), all_y.max()
@@ -142,44 +144,42 @@ def make_tracks_pdf(df: pd.DataFrame, pdf_path: str, rois=None):
         xlim = None
         ylim = None
 
-    # build a stable color map for IDs using the default color cycle
+    # stable color map
     import itertools
     prop_cycle = plt.rcParams["axes.prop_cycle"].by_key().get("color", ["C0", "C1", "C2", "C3"])
     color_cycle = itertools.cycle(prop_cycle)
-    id_to_color = {}
-    for i in ids:
-        id_to_color[i] = next(color_cycle)
+    id_to_color = {i: next(color_cycle) for i in ids}
 
-    # open a multipage PDF
-    from matplotlib.backends.backend_pdf import PdfPages
     with PdfPages(pdf_path) as pdf:
-        # 1) one page per ID, using global limits and per-ID color
+        # 1) individual pages
         for i in ids:
             x = df[f"x{i}"]
             y = df[f"y{i}"]
             fig, ax = plt.subplots(figsize=(6, 6))
-            # Draw ROIs if provided
+
+            # draw rois first
             if rois:
                 from matplotlib.patches import Polygon as _Polygon
                 for roi in rois:
                     poly = roi["poly"]
-                    ax.add_patch(_Polygon(poly, closed=True, fill=False, edgecolor="black", linewidth=1.0, alpha=0.6))
+                    ax.add_patch(_Polygon(poly, closed=True, fill=False,
+                                          edgecolor="black", linewidth=1.0, alpha=0.6))
+
             color = id_to_color[i]
             ax.plot(x, y, '-', linewidth=1.4, alpha=0.9, label=f"ID{i}", color=color)
 
-            # mark start/end for this ID
+            # start / end markers
             valid = (~x.isna()) & (~y.isna())
             if valid.any():
                 first_idx = valid.idxmax()
                 ax.scatter([x.iloc[first_idx]], [y.iloc[first_idx]],
                            s=70, marker='^', color=color,
                            edgecolor='black', linewidth=0.5)
-                last_idx = _np.where(valid.values)[0][-1]
+                last_idx = np.where(valid.values)[0][-1]
                 ax.scatter([x.iloc[last_idx]], [y.iloc[last_idx]],
                            s=70, marker='o', color=color,
                            edgecolor='black', linewidth=0.5)
 
-            # apply global limits so all pages match
             if xlim is not None and ylim is not None:
                 ax.set_xlim(*xlim)
                 ax.set_ylim(*ylim)
@@ -191,14 +191,17 @@ def make_tracks_pdf(df: pd.DataFrame, pdf_path: str, rois=None):
             pdf.savefig(fig)
             plt.close(fig)
 
-        # 2) final page with all IDs together
+        # 2) combined page
         fig, ax = plt.subplots(figsize=(6, 6))
-        # Draw ROIs if provided
+
+        # ROIs underneath
         if rois:
             from matplotlib.patches import Polygon as _Polygon
             for roi in rois:
                 poly = roi["poly"]
-                ax.add_patch(_Polygon(poly, closed=True, fill=False, edgecolor="black", linewidth=1.0, alpha=0.6))
+                ax.add_patch(_Polygon(poly, closed=True, fill=False,
+                                      edgecolor="black", linewidth=1.0, alpha=0.6))
+
         line_handles = []
         for i in ids:
             x = df[f"x{i}"]
@@ -206,6 +209,7 @@ def make_tracks_pdf(df: pd.DataFrame, pdf_path: str, rois=None):
             color = id_to_color[i]
             (line,) = ax.plot(x, y, '-', linewidth=1.2, alpha=0.9, label=f"ID{i}", color=color)
             line_handles.append(line)
+
         if xlim is not None and ylim is not None:
             ax.set_xlim(*xlim)
             ax.set_ylim(*ylim)
@@ -293,12 +297,12 @@ def write_pairwise_distances(df: pd.DataFrame, ids, base: str,
 # ROI HELPER FUNCTIONS
 # ==============================
 def parse_roi_string(s: str):
-    import re as _re
-    m = _re.search(r"\[\s*\[.*\]\s*\]", s)
+    m = re.search(r"\[\s*\[.*\]\s*\]", s)
     if not m:
         raise ValueError(f"Could not parse ROI polygon from: {s}")
     coords = eval(m.group(0), {"__builtins__": {}})
     return [(float(x), float(y)) for (x, y) in coords]
+
 
 def load_rois_from_toml(toml_path: str):
     with open(toml_path, "rb") as f:
@@ -316,6 +320,7 @@ def load_rois_from_toml(toml_path: str):
         rois.append({"name": name, "poly": poly})
     return rois
 
+
 def point_in_poly(x, y, poly):
     inside = False
     n = len(poly)
@@ -329,14 +334,15 @@ def point_in_poly(x, y, poly):
                 inside = not inside
     return inside
 
+
 def write_roi_outputs(df: pd.DataFrame, rois, beetle_ids, fps: float, out_base: str):
     num_frames = len(df)
-    # init state
     prev_inside = {bid: {roi["name"]: False for roi in rois} for bid in beetle_ids}
     frames_in_roi = {bid: {roi["name"]: 0 for roi in rois} for bid in beetle_ids}
     dist_in_roi = {bid: {roi["name"]: 0.0 for roi in rois} for bid in beetle_ids}
     prev_pos = {bid: (math.nan, math.nan) for bid in beetle_ids}
     events = []
+
     for frame_idx, row in df.iterrows():
         t_s = frame_idx / fps
         for bid in beetle_ids:
@@ -369,6 +375,7 @@ def write_roi_outputs(df: pd.DataFrame, rois, beetle_ids, fps: float, out_base: 
                         "event_type": "EXIT",
                     })
                 prev_inside[bid][roi_name] = inside
+
             # distance inside rois
             prev_x, prev_y = prev_pos[bid]
             if valid and not (math.isnan(prev_x) or math.isnan(prev_y)):
@@ -378,18 +385,16 @@ def write_roi_outputs(df: pd.DataFrame, rois, beetle_ids, fps: float, out_base: 
                     if prev_inside[bid][roi_name]:
                         dist_in_roi[bid][roi_name] += step
             prev_pos[bid] = (x, y)
-    # write events
+
     events_path = f"{out_base}_roi_events.csv"
     with open(events_path, "w", newline="", encoding="utf-8") as f:
-        import csv as _csv
-        w = _csv.DictWriter(f, fieldnames=["frame", "time_s", "beetle_id", "roi_name", "event_type"])
+        w = csv.DictWriter(f, fieldnames=["frame", "time_s", "beetle_id", "roi_name", "event_type"])
         w.writeheader()
         for ev in events:
             w.writerow(ev)
-    # write summary
+
     summary_path = f"{out_base}_roi_summary.csv"
     with open(summary_path, "w", newline="", encoding="utf-8") as f:
-        import csv as _csv
         fieldnames = [
             "beetle_id",
             "roi_name",
@@ -398,7 +403,7 @@ def write_roi_outputs(df: pd.DataFrame, rois, beetle_ids, fps: float, out_base: 
             "dist_in_roi_px",
             "total_frames",
         ]
-        w = _csv.DictWriter(f, fieldnames=fieldnames)
+        w = csv.DictWriter(f, fieldnames=fieldnames)
         w.writeheader()
         for bid in beetle_ids:
             for roi in rois:
@@ -413,6 +418,7 @@ def write_roi_outputs(df: pd.DataFrame, rois, beetle_ids, fps: float, out_base: 
                     "dist_in_roi_px": dist_in_roi[bid][roi_name],
                     "total_frames": num_frames,
                 })
+
     return events_path, summary_path
 
 
@@ -435,7 +441,7 @@ def process_trajectories(csv_path: str,
     frames = np.arange(num_frames, dtype=int)
     time_seconds = frames / fps
 
-    # Precompute per-ID coords and validity
+    # per-ID cache
     per_id = {}
     for i in ids:
         xi = df[f"x{i}"]
@@ -443,7 +449,7 @@ def process_trajectories(csv_path: str,
         valid = ~(xi.isna() | yi.isna())
         per_id[i] = {"x": xi, "y": yi, "valid": valid}
 
-    # Build events for all pairs and all NaN runs
+    # build events for all pairs + NaNs
     events = []
     for idx_i in range(len(ids)):
         i = ids[idx_i]
@@ -468,7 +474,8 @@ def process_trajectories(csv_path: str,
                         f"distance <= {int(threshold_px)}px; duration={e - s + 1} frames; IDs {i},{j} valid",
                     )
                 )
-    # NaN detection for each individual ID
+
+    # NaNs
     for i in ids:
         valid_i = per_id[i]["valid"]
         nan_mask = ~valid_i.values
@@ -482,13 +489,14 @@ def process_trajectories(csv_path: str,
                     f"ID{i} missing for {e - s + 1} frames",
                 )
             )
+
     events.sort(key=lambda r: (r[0], r[1], r[2]))
 
-    # build base name in output dir
+    # base name in output dir
     base_name = os.path.splitext(os.path.basename(csv_path))[0]
     base = os.path.join(output_dir, base_name)
 
-    # InqScribe: always write
+    # write InqScribe (always)
     inq_path = f"{base}_InqScribe_{int(threshold_px)}px_{fps:.0f}fps.txt"
     with open(inq_path, "w", encoding="utf-8-sig", newline="\n") as f:
         w = csv.writer(f, delimiter="\t", lineterminator="\n")
@@ -501,18 +509,19 @@ def process_trajectories(csv_path: str,
                 comment,
             ])
 
-    # ROI loading (move up to before PDF)
+    # load rois (if any)
     rois = None
     if toml_path is not None and toml_path != "":
         rois = load_rois_from_toml(toml_path)
 
-    # PDF (now pass rois)
+    # PDF
     pdf_path = f"{base}_tracks_{int(threshold_px)}px_{fps:.0f}fps.pdf"
-    make_tracks_pdf(df, pdf_path, rois if toml_path else None)
+    make_tracks_pdf(df, pdf_path, rois if rois else None)
 
-    # Pairwise
+    # pairwise
     pairwise_path = write_pairwise_distances(df, ids, base, fps, threshold_px)
 
+    # ROI CSVs
     roi_events_path = None
     roi_summary_path = None
     if rois is not None:
@@ -532,6 +541,7 @@ def run_gui():
     # vars
     csv_var = tk.StringVar()
     toml_var = tk.StringVar()
+    basedir_var = tk.StringVar()
     thresh_var = tk.StringVar(value="60")
     dur_var = tk.StringVar(value="0.2")  # seconds
     outdir_var = tk.StringVar()
@@ -546,6 +556,44 @@ def run_gui():
         except ValueError:
             frames_hint_var.set("")
 
+    def choose_basedir():
+        d = filedialog.askdirectory(title="Select base directory to scan")
+        if not d:
+            return
+        basedir_var.set(d)
+
+        # scan recursively for trajectories.csv and .toml
+        traj_files = []
+        toml_files = []
+        for rootdir, _dirs, files in os.walk(d):
+            for fname in files:
+                lower = fname.lower()
+                full = os.path.join(rootdir, fname)
+                if lower == "trajectories.csv":
+                    traj_files.append(full)
+                elif lower.endswith(".toml"):
+                    toml_files.append(full)
+
+        if len(traj_files) == 1:
+            csv_var.set(traj_files[0])
+        elif len(traj_files) > 1:
+            messagebox.showwarning(
+                "Multiple trajectories.csv found",
+                "More than one trajectories.csv was found in this directory tree. Please pick the correct one manually.",
+            )
+
+        if len(toml_files) == 1:
+            toml_var.set(toml_files[0])
+        elif len(toml_files) > 1:
+            messagebox.showwarning(
+                "Multiple TOML files found",
+                "More than one .toml file was found in this directory tree. Please pick the correct one manually.",
+            )
+
+        # default output dir = Post_Processing_Output inside chosen dir
+        ppo = os.path.join(d, "Post_Processing_Output")
+        outdir_var.set(ppo)
+
     def choose_csv():
         path = filedialog.askopenfilename(
             title="Select trajectories.csv",
@@ -553,8 +601,9 @@ def run_gui():
         )
         if path:
             csv_var.set(path)
-            # default output dir to CSV dir
-            outdir_var.set(os.path.dirname(path))
+            csv_dir = os.path.dirname(path)
+            ppo = os.path.join(csv_dir, "Post_Processing_Output")
+            outdir_var.set(ppo)
 
     def choose_outdir():
         d = filedialog.askdirectory(title="Select output directory")
@@ -566,7 +615,12 @@ def run_gui():
         if not csv_path or not os.path.exists(csv_path):
             messagebox.showerror("Error", "Please choose a valid trajectories.csv")
             return
-        out_dir = outdir_var.get().strip() or os.path.dirname(csv_path)
+
+        # output dir: if blank, make Post_Processing_Output next to CSV
+        out_dir = outdir_var.get().strip()
+        if not out_dir:
+            csv_dir = os.path.dirname(csv_path)
+            out_dir = os.path.join(csv_dir, "Post_Processing_Output")
         os.makedirs(out_dir, exist_ok=True)
 
         # parse numeric inputs
@@ -582,9 +636,10 @@ def run_gui():
             messagebox.showerror("Error", "Duration must be a number (seconds).")
             return
 
-        fps = 30.0  # fixed, you can add a box later
+        fps = 30.0  # could be made user-configurable
         min_frames = max(1, int(round(dur_seconds * fps)))
         toml_path = toml_var.get().strip()
+
         try:
             inq_path, pdf_path, pairwise_path, roi_events_path, roi_summary_path, n_events = process_trajectories(
                 csv_path,
@@ -608,31 +663,45 @@ def run_gui():
     frm = tk.Frame(root, padx=10, pady=10)
     frm.pack(fill="both", expand=True)
 
+    # base directory row
+    tk.Label(frm, text="Base directory:").grid(row=0, column=0, sticky="w")
+    tk.Entry(frm, textvariable=basedir_var, width=50).grid(row=0, column=1, sticky="we")
+    tk.Button(frm, text="Browse…", command=choose_basedir).grid(row=0, column=2, padx=5)
+
     # CSV
-    tk.Label(frm, text="Trajectories CSV:").grid(row=0, column=0, sticky="w")
-    tk.Entry(frm, textvariable=csv_var, width=50).grid(row=0, column=1, sticky="we")
-    tk.Button(frm, text="Browse…", command=choose_csv).grid(row=0, column=2, padx=5)
+    tk.Label(frm, text="Trajectories CSV:").grid(row=1, column=0, sticky="w")
+    tk.Entry(frm, textvariable=csv_var, width=50).grid(row=1, column=1, sticky="we")
+    tk.Button(frm, text="Browse…", command=choose_csv).grid(row=1, column=2, padx=5)
 
     # ROI TOML
-    tk.Label(frm, text="ROI TOML file:").grid(row=1, column=0, sticky="w")
-    tk.Entry(frm, textvariable=toml_var, width=50).grid(row=1, column=1, sticky="we")
-    tk.Button(frm, text="Browse…", command=lambda: toml_var.set(filedialog.askopenfilename(title="Select ROI TOML", filetypes=[("TOML files", "*.toml"), ("All files", "*.*")]))).grid(row=1, column=2, padx=5)
+    tk.Label(frm, text="ROI TOML file:").grid(row=2, column=0, sticky="w")
+    tk.Entry(frm, textvariable=toml_var, width=50).grid(row=2, column=1, sticky="we")
+    tk.Button(
+        frm,
+        text="Browse…",
+        command=lambda: toml_var.set(
+            filedialog.askopenfilename(
+                title="Select ROI TOML",
+                filetypes=[("TOML files", "*.toml"), ("All files", "*.*")],
+            )
+        ),
+    ).grid(row=2, column=2, padx=5)
 
     # threshold
-    tk.Label(frm, text="Distance threshold (px):").grid(row=2, column=0, sticky="w")
-    tk.Entry(frm, textvariable=thresh_var, width=10).grid(row=2, column=1, sticky="w")
+    tk.Label(frm, text="Distance threshold (px):").grid(row=3, column=0, sticky="w")
+    tk.Entry(frm, textvariable=thresh_var, width=10).grid(row=3, column=1, sticky="w")
 
     # duration
-    tk.Label(frm, text="Min contact duration (s):").grid(row=3, column=0, sticky="w")
+    tk.Label(frm, text="Min contact duration (s):").grid(row=4, column=0, sticky="w")
     dur_entry = tk.Entry(frm, textvariable=dur_var, width=10)
-    dur_entry.grid(row=3, column=1, sticky="w")
+    dur_entry.grid(row=4, column=1, sticky="w")
     dur_entry.bind("<FocusOut>", update_frames_hint)
-    tk.Label(frm, textvariable=frames_hint_var, fg="#555").grid(row=3, column=2, sticky="w")
+    tk.Label(frm, textvariable=frames_hint_var, fg="#555").grid(row=4, column=2, sticky="w")
 
     # output dir
-    tk.Label(frm, text="Output directory:").grid(row=4, column=0, sticky="w")
-    tk.Entry(frm, textvariable=outdir_var, width=50).grid(row=4, column=1, sticky="we")
-    tk.Button(frm, text="Choose…", command=choose_outdir).grid(row=4, column=2, padx=5)
+    tk.Label(frm, text="Output directory:").grid(row=5, column=0, sticky="w")
+    tk.Entry(frm, textvariable=outdir_var, width=50).grid(row=5, column=1, sticky="we")
+    tk.Button(frm, text="Choose…", command=choose_outdir).grid(row=5, column=2, padx=5)
 
     # run button
     tk.Button(
@@ -640,7 +709,7 @@ def run_gui():
         text="Run",
         width=12,
         command=do_run
-    ).grid(row=5, column=0, columnspan=3, pady=10, sticky="we")
+    ).grid(row=6, column=0, columnspan=3, pady=10, sticky="we")
 
     frm.columnconfigure(1, weight=1)
 
@@ -660,7 +729,8 @@ def main():
             print("File not found, exiting.")
             return
         toml_path = input("Path to ROI TOML (or leave blank): ").strip()
-        out_dir = os.path.dirname(csv_path)
+        out_dir = os.path.join(os.path.dirname(csv_path), "Post_Processing_Output")
+        os.makedirs(out_dir, exist_ok=True)
         try:
             inq_path, pdf_path, pairwise_path, roi_events_path, roi_summary_path, n_events = process_trajectories(
                 csv_path,
@@ -677,7 +747,7 @@ def main():
             if roi_events_path:
                 print(roi_events_path)
                 print(roi_summary_path)
-            print("ID1–ID2 events:", n_events)
+            print("Events:", n_events)
         except Exception as e:
             print("ERROR:", e)
 
