@@ -50,21 +50,86 @@ python IDTracker_PostProcessing_GUI.py
 ```
 This will open the GUI window where you can load your data and begin post-processing.
 
-### GUI Inputs
+### How the GUI Works
 
-1. **Trajectories CSV** – the .csv file exported by IDtracker.ai that contains the x1,y1, x2,y2, etc. columns for each tracked animal. This is the data you want to process.
+You begin by selecting a **base directory** that contains the outputs from IDTracker.ai. The script automatically scans that directory (and its subfolders) for a `trajectories.csv` file and a `.toml` file that defines the regions of interest (ROIs). If it finds exactly one of each, they will be automatically selected for you. If multiple such files are found, the GUI will show a warning so you can manually pick the correct ones. The script then creates a new folder called `Post_Processing_Output` in that same directory, and all outputs will be saved there by default.
 
-2. **Distance threshold (px)** – the maximum separation (in pixels) between two animals’ centroids for them to be considered “in contact.” This value determines when a proximity event gets logged in the InqScribe output. Because camera resolution, tracking scale, and even animal size can vary from year to year, you should verify this distance for each batch of videos.
+If you prefer, you can bypass the base directory scan and manually choose the `trajectories.csv` and `.toml` files yourself using the corresponding browse buttons.
 
-A quick check is to load a representative video frame in Fiji/ImageJ and measure the pixel distance between the centres of two beetles when they’re just touching. In your current setup, 60 px works well for most recordings, but you should re‑measure and adjust this threshold annually.
+Once your files are selected, you can customize the analysis parameters:
+- **Distance threshold (px):** The pixel distance used to define when two beetles are considered in contact.
+- **Minimum contact duration (s):** The minimum number of seconds beetles must remain within that distance to count as a proximity event.
+- **Output directory:** Optional. If left blank, it will default to the automatically created `Post_Processing_Output` folder.
 
-3. **Min contact duration (s)** – the minimum time that two animals must remain within the distance threshold for the script to register an event. This helps filter out brief, incidental passes.
+Press **Run** to execute. When processing completes, a popup will confirm success and list the full paths to all generated files.
 
-In your implementation the frame rate is fixed at 30 fps, so a duration of 0.2 s corresponds to 6 frames. This  translates to six seconds in real time (since we record 1 frame per second), which seems reasonable for many interactions. If you want to capture briefer contacts, you could lower the duration to 0.1 s (about 3 frames, or 3 seconds in real time), but very short durations may include spurious touches; if you’re concerned about missing longer interactions, increase the value accordingly.
+### Output Files
 
-4. **Output directory** – the folder where the generated files (InqScribe table, tracks PDF, and pairwise distances CSV) will be saved. If you leave it blank, the script defaults to the same directory as the input CSV.
+The script produces several files summarizing spatial, temporal, and interaction data:
 
-By tuning the pixel threshold and contact duration for each video dataset, you ensure that the proximity events recorded reflect true interactions rather than artifacts of tracking resolution or frame rate.
+1. **InqScribe‑ready tab‑delimited file** (`*_InqScribe_<threshold>px_<fps>fps.txt`)
+   - A file that can be imported directly into InqScribe to visualize and annotate interaction events.
+   - Includes both proximity events (where two beetles were within the distance threshold for the required duration) and NaN events (where one beetle’s position is missing—often indicating overlap or fights).
+
+2. **Pairwise Distances CSV** (`*_pairwise_distances_<threshold>px_<fps>fps.csv`)
+   - Frame‑by‑frame distances between every possible pair of beetles.
+   - Each row corresponds to a single frame and a unique pair of beetles.
+
+3. **Multi‑page Tracks PDF** (`*_tracks_<threshold>px_<fps>fps.pdf`)
+   - Each beetle’s trajectory is drawn on its own page, color‑coded consistently across all pages.
+   - The final page shows all beetles together.
+   - Black polygons show the ROIs (the arena and individual fungus brackets).
+   - Triangles mark starting positions; circles mark final positions.
+
+4. **ROI Events CSV** (`*_roi_events.csv`)
+   - A log of every time each beetle enters or exits a defined ROI.
+   - Useful for quantifying behavioral transitions or detecting when beetles move on/off fungus brackets.
+
+5. **ROI Summary CSV** (`*_roi_summary.csv`)
+   - A summary of how much time each beetle spent within each ROI, the distance they traveled inside it, and the total video duration.
+
+All files are saved into the same `Post_Processing_Output` directory unless you choose another location.
+
+---
+## Data Dictionary
+
+### 1. InqScribe File (`*_InqScribe_<threshold>px_<fps>fps.txt`)
+| Column | Description |
+|---------|-------------|
+| Start Time | Event start timestamp in HH:MM:SS,mmm format |
+| End Time | Event end timestamp in HH:MM:SS,mmm format |
+| Title | Text label describing the event (e.g., `Proximity: ID1–ID2`, or `NaN: ID3 missing`) |
+| Comment | Detailed information, including frame range and distance/duration notes |
+
+### 2. Pairwise Distances File (`*_pairwise_distances_<threshold>px_<fps>fps.csv`)
+| Column | Description |
+|---------|-------------|
+| frame | Frame number |
+| time_s | Time in seconds (relative to start of video) |
+| id_i | ID of the first beetle in the pair |
+| id_j | ID of the second beetle in the pair |
+| distance_px | Distance between the two beetles’ centroids in pixels |
+| both_valid | 1 if both beetles were successfully tracked in that frame, else 0 |
+| contact_le_<threshold>px | 1 if beetles were within the threshold distance, else 0 |
+
+### 3. ROI Events File (`*_roi_events.csv`)
+| Column | Description |
+|---------|-------------|
+| frame | Frame number of the event |
+| time_s | Time of the event in seconds |
+| beetle_id | Numeric ID of the beetle involved |
+| roi_name | Name of the ROI (e.g., `arena`, `bracket1`, etc.) |
+| event_type | `ENTER` or `EXIT` depending on the transition |
+
+### 4. ROI Summary File (`*_roi_summary.csv`)
+| Column | Description |
+|---------|-------------|
+| beetle_id | Numeric ID of the beetle |
+| roi_name | ROI label (e.g., `arena`, `bracket2`, etc.) |
+| frames_in_roi | Number of frames the beetle was inside the ROI |
+| pct_time_in_roi | Fraction of total frames spent in the ROI (0–1) |
+| dist_in_roi_px | Total distance traveled (in pixels) while inside the ROI |
+| total_frames | Total number of frames in the video |
 
 ## CLI Fallback
 
