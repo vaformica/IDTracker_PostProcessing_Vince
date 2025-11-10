@@ -30,9 +30,11 @@ except Exception:
 import pandas as pd
 import numpy as np
 
+
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
 
 
 # ==============================
@@ -95,15 +97,14 @@ def discover_ids(df: pd.DataFrame):
 
 def make_tracks_pdf(df: pd.DataFrame, pdf_path: str):
     """
-    Draw trajectories for all detected IDs (x1,y1 ... x12,y12).
-    - Plots every ID's path
-    - Still marks start/end for ID1 and ID2 (your primary pair)
-    - Legend in lower-left so it doesn't occlude
+    Create a multi-page PDF:
+    - One page per individual ID (xN,yN)
+    - One final page with all IDs together
+    Colors are consistent across pages, and all pages use the same x/y limits.
     """
     # find all IDs present
     ids = []
     for col in df.columns:
-        # look for xN / yN pattern
         import re as _re
         m = _re.fullmatch(r"x(\d+)", col)
         if m:
@@ -114,47 +115,94 @@ def make_tracks_pdf(df: pd.DataFrame, pdf_path: str):
     if not ids:
         return
 
-    plt.figure(figsize=(6, 6))
-    line_handles = []
-
-    # plot every ID we found
+    # collect all x/y to get global extents
+    all_x_list = []
+    all_y_list = []
     for i in ids:
         x = df[f"x{i}"]
         y = df[f"y{i}"]
-        (line,) = plt.plot(x, y, '-', linewidth=1.2, alpha=0.9, label=f"ID{i}")
-        line_handles.append(line)
+        all_x_list.append(x.to_numpy(dtype=float))
+        all_y_list.append(y.to_numpy(dtype=float))
+    import numpy as _np
+    all_x = _np.concatenate([_np.array(a, dtype=float) for a in all_x_list])
+    all_y = _np.concatenate([_np.array(a, dtype=float) for a in all_y_list])
+    all_x = all_x[~_np.isnan(all_x)]
+    all_y = all_y[~_np.isnan(all_y)]
+    if all_x.size > 0 and all_y.size > 0:
+        xmin, xmax = all_x.min(), all_x.max()
+        ymin, ymax = all_y.min(), all_y.max()
+        pad_x = (xmax - xmin) * 0.05 if xmax > xmin else 10
+        pad_y = (ymax - ymin) * 0.05 if ymax > ymin else 10
+        xlim = (xmin - pad_x, xmax + pad_x)
+        ylim = (ymin - pad_y, ymax + pad_y)
+    else:
+        xlim = None
+        ylim = None
 
-    # mark starts/ends for ID1 and ID2 if present
-    for i, color_line in [(1, None), (2, None)]:
-        if f"x{i}" in df.columns and f"y{i}" in df.columns:
+    # build a stable color map for IDs using the default color cycle
+    import itertools
+    prop_cycle = plt.rcParams["axes.prop_cycle"].by_key().get("color", ["C0", "C1", "C2", "C3"])
+    color_cycle = itertools.cycle(prop_cycle)
+    id_to_color = {}
+    for i in ids:
+        id_to_color[i] = next(color_cycle)
+
+    # open a multipage PDF
+    from matplotlib.backends.backend_pdf import PdfPages
+    with PdfPages(pdf_path) as pdf:
+        # 1) one page per ID, using global limits and per-ID color
+        for i in ids:
             x = df[f"x{i}"]
             y = df[f"y{i}"]
+            fig, ax = plt.subplots(figsize=(6, 6))
+            color = id_to_color[i]
+            ax.plot(x, y, '-', linewidth=1.4, alpha=0.9, label=f"ID{i}", color=color)
+
+            # mark start/end for this ID
             valid = (~x.isna()) & (~y.isna())
             if valid.any():
-                # get the line color we used above
-                # find the corresponding handle
-                handle = None
-                for h in line_handles:
-                    if h.get_label() == f"ID{i}":
-                        handle = h
-                        break
-                color = handle.get_color() if handle is not None else None
-
                 first_idx = valid.idxmax()
-                plt.scatter([x.iloc[first_idx]], [y.iloc[first_idx]],
-                            s=70, marker='^', color=color, edgecolor='black', linewidth=0.5)
-                last_idx = np.where(valid.values)[0][-1]
-                plt.scatter([x.iloc[last_idx]], [y.iloc[last_idx]],
-                            s=70, marker='o', color=color, edgecolor='black', linewidth=0.5)
+                ax.scatter([x.iloc[first_idx]], [y.iloc[first_idx]],
+                           s=70, marker='^', color=color,
+                           edgecolor='black', linewidth=0.5)
+                last_idx = _np.where(valid.values)[0][-1]
+                ax.scatter([x.iloc[last_idx]], [y.iloc[last_idx]],
+                           s=70, marker='o', color=color,
+                           edgecolor='black', linewidth=0.5)
 
-    plt.gca().invert_yaxis()
-    plt.title("Tracked paths (all IDs)")
-    plt.xlabel("x (pixels)")
-    plt.ylabel("y (pixels)")
-    plt.legend(handles=line_handles, loc="lower left", frameon=False)
-    plt.tight_layout()
-    plt.savefig(pdf_path)
-    plt.close()
+            # apply global limits so all pages match
+            if xlim is not None and ylim is not None:
+                ax.set_xlim(*xlim)
+                ax.set_ylim(*ylim)
+            ax.set_aspect('equal', adjustable='box')
+            ax.invert_yaxis()
+            ax.set_title(f"Tracked path – ID{i}")
+            ax.set_xlabel("x (pixels)")
+            ax.set_ylabel("y (pixels)")
+            pdf.savefig(fig)
+            plt.close(fig)
+
+        # 2) final page with all IDs together
+        fig, ax = plt.subplots(figsize=(6, 6))
+        line_handles = []
+        for i in ids:
+            x = df[f"x{i}"]
+            y = df[f"y{i}"]
+            color = id_to_color[i]
+            (line,) = ax.plot(x, y, '-', linewidth=1.2, alpha=0.9, label=f"ID{i}", color=color)
+            line_handles.append(line)
+        if xlim is not None and ylim is not None:
+            ax.set_xlim(*xlim)
+            ax.set_ylim(*ylim)
+        ax.set_aspect('equal', adjustable='box')
+        ax.invert_yaxis()
+        ax.set_title("Tracked paths (all IDs)")
+        ax.set_xlabel("x (pixels)")
+        ax.set_ylabel("y (pixels)")
+        ax.legend(handles=line_handles, loc="lower left", frameon=False)
+        plt.tight_layout()
+        pdf.savefig(fig)
+        plt.close(fig)
 
 
 def write_pairwise_distances(df: pd.DataFrame, ids, base: str,
