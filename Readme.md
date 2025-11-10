@@ -54,6 +54,8 @@ This will open the GUI window where you can load your data and begin post-proces
 
 You begin by selecting a **base directory** that contains the outputs from IDTracker.ai. The script automatically scans that directory (and its subfolders) for a `trajectories.csv` file and a `.toml` file that defines the regions of interest (ROIs). If it finds exactly one of each, they will be automatically selected for you. If multiple such files are found, the GUI will show a warning so you can manually pick the correct ones. The script then creates a new folder called `Post_Processing_Output` in that same directory, and all outputs will be saved there by default.
 
+> **Important:** The base directory you select should be the same folder produced by IDTracker.ai for a specific video. This folder must contain both a `trajectories.csv` file (the tracked position data) and a `.toml` file (which defines the arena and bracket ROIs). The script depends on both files to run correctly — if either one is missing, the analysis will not proceed.
+
 If you prefer, you can bypass the base directory scan and manually choose the `trajectories.csv` and `.toml` files yourself using the corresponding browse buttons.
 
 Once your files are selected, you can customize the analysis parameters:
@@ -155,13 +157,6 @@ This project is licensed under the MIT License. See the LICENSE file for details
 
 ## Next Steps
 - Run a bunch of tracking runs on differnt cells
-- Try the stats package
-- Take toml file so it calculates one and off bracket and draws in the bracket shape in black on the PDF outputs.
 - Have it calculate stats
-      - Distance traveled (excluding big jumps in a frame or two? --not sure how to do that)
-      - median speed over 10 frame time
       - Duration in fights (once I have that from step below)
-      - 
 - Have it identify possible fights from log term closeness or closenss followed by NAs
-- 
-- Add per-individual summary metrics and interaction network visualizations using the new pairwise output.
